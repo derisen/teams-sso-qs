@@ -5,13 +5,23 @@ import React from 'react';
 import './App.css';
 import * as microsoftTeams from "@microsoft/teams-js";
 import { Avatar, Loader } from '@fluentui/react-northstar'
+import { PublicClientApplication } from "@azure/msal-browser"
+
+
+const msalConfig = {
+  auth: {
+    clientId: process.env.REACT_APP_AZURE_APP_REGISTRATION_ID,
+    authority: "https://login.microsoftonline.com/common",
+    redirectUri: "https://ea87c4cfe889.ngrok.io/tab",
+  }
+}
 
 /**
  * The 'PersonalTab' component renders the main tab content
  * of your app.
  */
 class Tab extends React.Component {
-  constructor(props){
+  constructor(props) {
     super(props)
     this.state = {
       context: {},
@@ -30,7 +40,8 @@ class Tab extends React.Component {
     this.consentFailure = this.consentFailure.bind(this);
     this.unhandledFetchError = this.unhandledFetchError.bind(this);
     this.callGraphFromClient = this.callGraphFromClient.bind(this);
-    this.showConsentDialog = this.showConsentDialog.bind(this);
+
+    this.msalClient = new PublicClientApplication(msalConfig);
   }
 
   //React lifecycle method that gets called once a component has finished mounting
@@ -71,12 +82,26 @@ class Tab extends React.Component {
     let response = await fetch(serverURL).catch(this.unhandledFetchError); //This calls getGraphAccessToken route in /api-server/app.js
     let data = await response.json().catch(this.unhandledFetchError);
 
-
-    if(!response.ok && data.error==='consent_required'){
+    if(data.subError==='consent_required'){
       //A consent_required error means it's the first time a user is logging into to the app, so they must consent to sharing their Graph data with the app.
       //They may also see this error if MFA is required.
       this.setState({consentRequired:true}); //This displays the consent required message.
-      this.showConsentDialog(); //Proceed to show the consent dialogue.
+      // this.showConsentDialog(); //Proceed to show the consent dialogue.
+      
+      //Show a popup dialogue prompting the user to consent to the required API permissions. This opens ConsentPopup.js.
+      //Learn more: https://docs.microsoft.com/en-us/microsoftteams/platform/tabs/how-to/authentication/auth-tab-aad#initiate-authentication-flow
+      this.msalClient.acquireTokenPopup({
+        scopes: ["user.read"]
+      })
+        .then(response => {
+          console.log(response);
+          this.consentSuccess(response.accessToken);
+        })
+        .catch((error) => {
+          console.log(error);
+          this.consentFailure(error);
+        })
+      
     } else if (!response.ok) {
       //Unknown error
       console.error(data);
@@ -85,19 +110,6 @@ class Tab extends React.Component {
       //Server side token exchange worked. Save the access_token to state, so that it can be picked up and used by the componentDidMount lifecycle method.
       this.setState({graphAccessToken:data['accessToken']});
     }
-  }
-
-  //Show a popup dialogue prompting the user to consent to the required API permissions. This opens ConsentPopup.js.
-  //Learn more: https://docs.microsoft.com/en-us/microsoftteams/platform/tabs/how-to/authentication/auth-tab-aad#initiate-authentication-flow
-  showConsentDialog(){ 
-
-    microsoftTeams.authentication.authenticate({
-      url: window.location.origin + "/auth-start",
-      width: 600,
-      height: 535,
-      successCallback: (result) => {this.consentSuccess(result)},
-      failureCallback: (reason) => {this.consentFailure(reason)}
-    });
   }
 
   //Callback function for a successful authorization
